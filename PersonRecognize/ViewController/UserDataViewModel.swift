@@ -48,9 +48,14 @@ class UserDataViewModel {
             guard let self = self else { return }
             // Placeholder for actual Firebase call:
             // fb.loadUsers { result in ... }
-            let mockUserDict = ["UserA": 1, "UserB": 2, "UserC": 3, "AnotherUser": 4, "TestUser": 5]
-            self.userList = mockUserDict.map { [$0.key: $0.value] }
-                .sorted { ($0.keys.first ?? "").lowercased() < ($1.keys.first ?? "").lowercased() }
+            let mockUserDict = ["UserA": 1, "UserB": 2, "UserC": 3, "AnotherUser": 4, "TestUser": 5] // Example Data
+            var tempList = [[String: Int]]() // Create a mutable list
+            for (key, value) in mockUserDict {
+                tempList.append([key:value])
+            }
+            self.userList = tempList.sorted { ($0.keys.first ?? "").lowercased() < ($1.keys.first ?? "").lowercased() }
+
+
             self.searchResult.accept(self.userList)
             self.statusMessage.accept(self.userList.isEmpty ? "No users found." : "Users loaded successfully.")
             self.isLoading.accept(false)
@@ -123,3 +128,4 @@ class UserDataViewModel {
         // statusMessage.accept("Finished generating all vectors.")
     }
 }
+```
