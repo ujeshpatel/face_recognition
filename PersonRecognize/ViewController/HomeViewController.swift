@@ -7,111 +7,141 @@
 //
 
 import UIKit
-import AVFoundation
-import RealmSwift
+// AVFoundation, RealmSwift are no longer directly used here
 import ProgressHUD
-//import KDTree
+import RxSwift
+import RxCocoa
 
+// KDTree is not used here anymore
 
 class HomeViewController: UIViewController {
     
     @IBOutlet weak var img: UIImageView!
     @IBOutlet weak var vectorsLabel: UILabel!
+    
+    private var viewModel: HomeViewModel!
+    private let disposeBag = DisposeBag()
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        loadData()
-        if !NetworkChecker.isConnectedToInternet {
-            showDialog(message: "You have not connected to internet. Using local data.")
-        }
+        
+        viewModel = HomeViewModel()
+        bindView() // Set up bindings before loading data that might emit events
+        viewModel.loadData()
+        
+        // Removed: Direct NetworkChecker check and showDialog call.
+        // This is now handled by the ViewModel's statusMessage relay.
     }
+    
+    private func bindView() {
+        // Vectors Label
+        viewModel.vectorsLabelText
+            .observe(on: MainScheduler.instance)
+            .bind(to: vectorsLabel.rx.text)
+            .disposed(by: disposeBag)
+
+        // Display Image
+        viewModel.displayImage
+            .observe(on: MainScheduler.instance)
+            .bind(to: img.rx.image)
+            .disposed(by: disposeBag)
+
+        // Loading State
+        viewModel.isLoading
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { isLoading in
+                if isLoading {
+                    ProgressHUD.animate("Processing...") // ViewModel can provide more specific messages if needed
+                } else {
+                    ProgressHUD.dismiss()
+                }
+            })
+            .disposed(by: disposeBag)
+
+        // Status Messages
+        viewModel.statusMessage
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { [weak self] message in
+                self?.showDialog(message: message) // Assuming showDialog is an extension or helper method
+            })
+            .disposed(by: disposeBag)
+
+        // Navigation Events
+        viewModel.navigationEvent
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { [weak self] target in
+                let segueIdentifier: String
+                switch target {
+                case .startPredict:
+                    segueIdentifier = "startPredict"
+                case .openPredictImage:
+                    segueIdentifier = "openPredictImage"
+                case .openAddUser:
+                    segueIdentifier = "openAddUser"
+                case .viewFace:
+                    segueIdentifier = "viewFace"
+                case .viewLog:
+                    segueIdentifier = "viewLog"
+                }
+                self?.performSegue(withIdentifier: segueIdentifier, sender: nil)
+            })
+            .disposed(by: disposeBag)
+    }
+
     override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
         navigationController?.isNavigationBarHidden = true
-        if let i = current {
-            img.image  = UIImage(cgImage: i)
-        }
-        
+        viewModel.handleViewWillAppear()
+        // Removed: Direct update of img.image (now handled by displayImage relay)
     }
+    
     override func viewDidAppear(_ animated: Bool) {
-        fnet.clean()
-        //loadData()
+        super.viewDidAppear(animated)
+        viewModel.handleViewDidAppear()
+        // Removed: Direct call to fnet.clean() and commented out loadData()
     }
+    
     override func viewWillDisappear(_ animated: Bool) {
-        self.navigationController?.setNavigationBarHidden(false, animated: animated);
         super.viewWillDisappear(animated)
-        fnet.load()
-        
-        
-        
+        self.navigationController?.setNavigationBarHidden(false, animated: animated)
+        viewModel.handleViewWillDisappear()
+        // Removed: Direct call to fnet.load()
     }
     
     @IBAction func tapStart(_ sender: UIButton) {
-        self.performSegue(withIdentifier: "startPredict", sender: nil)
+        viewModel.navigationButtonTapped(target: .startPredict)
     }
+    
     @IBAction func tapPredictImage(_ sender: UIButton) {
-        self.performSegue(withIdentifier: "openPredictImage", sender: nil)
+        viewModel.navigationButtonTapped(target: .openPredictImage)
     }
+    
     @IBAction func tapAddUser(_ sender: UIButton) {
-        self.performSegue(withIdentifier: "openAddUser", sender: nil)
+        viewModel.navigationButtonTapped(target: .openAddUser)
     }
+    
     @IBAction func tapViewData(_ sender: UIButton) {
-        self.performSegue(withIdentifier: "viewFace", sender: nil)
+        viewModel.navigationButtonTapped(target: .viewFace)
     }
+    
     @IBAction func tapViewLog(_ sender: UIButton) {
-        self.performSegue(withIdentifier: "viewLog", sender: nil)
+        viewModel.navigationButtonTapped(target: .viewLog)
     }
+    
     @IBAction func tapSyncData(_ sender: UIButton) {
-        loadData()
-        if !NetworkChecker.isConnectedToInternet {
-            showDialog(message: "You have not connected to internet. Using local data.")
-            ProgressHUD.dismiss()
-        }
+        viewModel.syncDataTriggered()
+        // Removed: Direct NetworkChecker check, showDialog, and ProgressHUD.dismiss()
     }
     
-    func loadData() {
-        if NetworkChecker.isConnectedToInternet {
-            ProgressHUD.animate("Loading users...")
-            fb.loadVector { [self] (result) in
-                kMeanVectors = result
-                print("Number of k-Means vectors: \(kMeanVectors.count)")
-                vectorsLabel.text = "You have \(kMeanVectors.count / NUMBER_OF_K) users."
-                //tree = KDTree(values: kMeanVectors)
-                ProgressHUD.dismiss()
-                
-                //save to local data
-                try! realm.write {
-                    realm.deleteAll()
-                }
-                for vector in kMeanVectors {
-                    vectorHelper.saveVector(vector)
-                }
-            }
-            
-            //            fb.loadLogTimes { (result) in
-            //                attendList = result
-            //                for user in attendList {
-            //                    let u = User(name: user.name, image: UIImage(named: "LaunchImage")!, time: user.time)
-            //                    localUserList.append(u)
-            //                }
-            //            }
-            fb.loadUsers(completionHandler: { (result) in
-                userDict = result
-                print("Number of users: \(userDict.count)")
-                ProgressHUD.dismiss()
-            })
-            
-        }
-        else {
-            //for local data
-            let result = realm.objects(SavedVector.self)
-            print(result.count)
-            kMeanVectors = []
-            for vector in result {
-                let v = Vector(name: vector.name, vector: stringToArray(string: vector.vector), distance: vector.distance)
-                kMeanVectors.append(v)
-            }
-            vectorsLabel.text = "You have \(kMeanVectors.count / NUMBER_OF_K) users."
-        }
-    }
-    
+    // Removed loadData() method entirely.
 }
 
+// Assuming UIViewController+ShowDialog.swift or similar provides this:
+// extension UIViewController {
+//    func showDialog(message: String) {
+//        let alert = UIAlertController(title: "Info", message: message, preferredStyle: .alert)
+//        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+//        self.present(alert, animated: true, completion: nil)
+//    }
+// }
+```

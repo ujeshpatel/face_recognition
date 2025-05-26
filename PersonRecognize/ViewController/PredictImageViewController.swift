@@ -7,11 +7,14 @@
 //
 
 import UIKit
-import AVFoundation
-import FaceCropper
-import MBProgressHUD
+// AVFoundation is no longer directly used here
+import FaceCropper // Still needed if UIImage.face.crop is used by ViewModel, but VC doesn't call it
+// MBProgressHUD is not used
 import ProgressHUD
-//import KDTree
+import RxSwift
+import RxCocoa
+
+// KDTree is not used here anymore
 
 class PredictImageViewController: UIViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     
@@ -21,117 +24,122 @@ class PredictImageViewController: UIViewController, UIImagePickerControllerDeleg
     @IBOutlet weak var nameFace2: UILabel!
     @IBOutlet weak var nameFace1: UILabel!
     
+    private var viewModel: PredictImageViewModel!
+    private let disposeBag = DisposeBag()
     
-    //let knn: KNNDTW = KNNDTW()
-    var corner:CGFloat = 35
+    // Removed: var corner:CGFloat = 35
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        fnet.load()
-        clearData()
         
-        print(kMeanVectors.count)
-        //        tree = KDTree(values: kMeanVectors)
-        //
-        //
-        //        var training_samples: [knn_curve_label_pair] = [knn_curve_label_pair]()
-        //        for vector in kMeanVectors {
-        //            training_samples.append(knn_curve_label_pair(curve: vector.vector, label: vector.name))
-        //        }
-        //        knn.configure(neighbors: 1, max_warp: 0)
-        //        knn.train(data_sets: training_samples)
-        //
+        viewModel = PredictImageViewModel()
+        bindView()
+        
+        // Removed: fnet.load()
+        // Removed: clearData() call
+        // Removed: Commented-out KNN code
     }
     
+    private func bindView() {
+        viewModel.mainImage
+            .observe(on: MainScheduler.instance)
+            .bind(to: mainImg.rx.image)
+            .disposed(by: disposeBag)
+        
+        viewModel.face1Image
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { [weak self] image in
+                self?.face1.image = image
+                if image != nil {
+                    self?.face1.layer.cornerRadius = self?.viewModel.cornerRadius ?? 35
+                    self?.face1.layer.masksToBounds = true
+                } else {
+                     self?.face1.layer.cornerRadius = 0 // Reset if no image
+                }
+            })
+            .disposed(by: disposeBag)
+
+        viewModel.face2Image
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { [weak self] image in
+                self?.face2.image = image
+                if image != nil {
+                    self?.face2.layer.cornerRadius = self?.viewModel.cornerRadius ?? 35
+                    self?.face2.layer.masksToBounds = true
+                } else {
+                    self?.face2.layer.cornerRadius = 0 // Reset if no image
+                }
+            })
+            .disposed(by: disposeBag)
+            
+        viewModel.nameFace1Text
+            .observe(on: MainScheduler.instance)
+            .bind(to: nameFace1.rx.text)
+            .disposed(by: disposeBag)
+            
+        viewModel.nameFace2Text
+            .observe(on: MainScheduler.instance)
+            .bind(to: nameFace2.rx.text)
+            .disposed(by: disposeBag)
+
+        viewModel.alertMessage
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { [weak self] message in
+                self?.showDialog(message: message) // Assuming showDialog is an extension or helper
+            })
+            .disposed(by: disposeBag)
+        
+        viewModel.isLoading
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { isLoading in
+                if isLoading {
+                    ProgressHUD.animate("Processing...")
+                } else {
+                    ProgressHUD.dismiss()
+                }
+            })
+            .disposed(by: disposeBag)
+    }
     
     @IBAction func tapTakePhoto(_ sender: UIButton) {
+        viewModel.clearResults() // Clear previous results before picking a new image
+        
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-            print("Camera is not available.")
+            // Show alert or log, ViewModel could also handle this via an event if needed
+            self.showDialog(message: "Camera is not available.")
             return
         }
         let imagePicker = UIImagePickerController()
         imagePicker.sourceType = .camera
         imagePicker.cameraFlashMode = UIImagePickerController.CameraFlashMode.off
-        imagePicker.allowsEditing = true
+        imagePicker.allowsEditing = true // Or false, depending on desired behavior
         imagePicker.delegate = self
-        clearData()
         present(imagePicker, animated: true, completion: nil)
     }
     
-    func clearData() {
-        face2.image = nil
-        face2.image = nil
-        nameFace1.text = ""
-        nameFace2.text = ""
-    }
+    // Removed: func clearData()
+
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
         picker.dismiss(animated: true)
-        if let image = info[.editedImage] as? UIImage {
-            print("this is image")
-            self.mainImg.image = image
-            
-            let start = DispatchTime.now()
-            /*
-            
-            //            let frame = CIImage(image: image)!
-            //            let img = fDetector.extractFaces(frame: frame)
-            //            guard let i = img.first else {
-            //                return
-            //            }
-            //            let targetVector = fnet.run(image: i)
-            
-            //
-            //
-            //
-            //
-            //let re = find(vector: Vector(name: "abc", vector: targetVector, distance: 0))
-     
-            
-            //nameFace1.text = dict[re![0]]
-            //            let prediction: knn_certainty_label_pair = knn.predict(curve_to_test: targetVector)
-            //            print("predicted " + prediction.label, "with ", prediction.probability*100,"% certainty")
-            //            nameFace1.text = "\(prediction.label): \(prediction.probability*100)%"
-             */
-            let result = vectorHelper.getResult(image: image)
-            let end = DispatchTime.now()
-            let nanoTime = end.uptimeNanoseconds - start.uptimeNanoseconds
-            let timeInterval = Double(nanoTime) / 1_000_000_000
-            //
-            //print(re)
-            //nameFace1.text = re
-            nameFace1.text = "\(result.name): \(result.distance)%"
-            nameFace2.text = "Time taken: \(timeInterval)seconds."
-            //
-//            let today = Date()
-//            formatter.dateFormat = DATE_FORMAT
-//            let timestamp = formatter.string(from: today)
-//            let detectedUser = User(name: result.name, image: image, time: timestamp)
-//            ProgressHUD.show("Uploading")
-//            uploadLogs(user: detectedUser) {  error in
-//                    if error != nil {
-//                        self.showDialog(message: "Error uploading.")
-//                    }
-//                ProgressHUD.dismiss()
-//
-//            }
-            
-            image.face.crop { [self] res in
-                switch res {
-                case .success(let faces):
-                    self.face1.image = faces[0]
-                    self.face1.layer.cornerRadius = self.corner
-                    self.face2.layer.cornerRadius = self.corner
-                    if faces.count == 2 {
-                        self.face1.image = faces[0]
-                        self.face2.image = faces[1]
-                        self.nameFace1.text = "\(vectorHelper.getResult(image: faces[0]).name): \(vectorHelper.getResult(image: faces[0]).distance)%"
-                        self.nameFace2.text = "\(vectorHelper.getResult(image: faces[1]).name): \(vectorHelper.getResult(image: faces[1]).distance)%"
-                    }
-                case .notFound:
-                    self.showDialog(message: "Not found any face!")
-                case .failure(let error):
-                    print("Error crop face: \(error)")
-                }
-            }
+        
+        guard let image = (info[.editedImage] as? UIImage) ?? (info[.originalImage] as? UIImage) else {
+            print("No image found")
+            // Optionally, inform the user via alertMessage relay in ViewModel
+            // viewModel.alertMessage.accept("Could not retrieve image from picker.")
+            return
         }
+        viewModel.processImage(image)
+        
+        // Removed all image processing, vectorHelper calls, image.face.crop, and direct UI updates.
     }
 }
+
+// Assuming UIViewController+ShowDialog.swift or similar provides this:
+// extension UIViewController {
+//    func showDialog(message: String) {
+//        let alert = UIAlertController(title: "Info", message: message, preferredStyle: .alert)
+//        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+//        self.present(alert, animated: true, completion: nil)
+//    }
+// }
+```
